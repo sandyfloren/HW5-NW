@@ -28,15 +28,11 @@ class NeedlemanWunsch:
     """
     def __init__(self, sub_matrix_file: str, gap_open: float, gap_extend: float):
         # Init alignment and gap matrices
-        self._align_matrix = None
-        self._gapA_matrix = None
-        self._gapB_matrix = None
+        self._scores_mat = None
 
         # Init matrices for backtrace procedure
         self._back = None
-        self._back_A = None
-        self._back_B = None
-
+  
         # Init alignment_score
         self.alignment_score = 0
 
@@ -115,6 +111,17 @@ class NeedlemanWunsch:
          	(alignment score, seqA alignment, seqB alignment) : Tuple[float, str, str]
          		the score and corresponding strings for the alignment of seqA and seqB
         """
+        # Handle case of empty strings
+        if seqA == "":
+            if seqB == "":
+                return 0., "", ""
+            else:
+                score = self.gap_open + self.gap_extend * (len(seqB)-1)
+                return score, "-" * len(seqB), seqB
+        elif seqB == "":
+            score = self.gap_open + self.gap_extend * (len(seqA)-1)
+            return score, seqA, "-" * len(seqA)
+
         # Resetting alignment in case method is called more than once
         self.seqA_align = ""
         self.seqB_align = ""
@@ -126,14 +133,71 @@ class NeedlemanWunsch:
         self._seqA = seqA
         self._seqB = seqB
         
-        # TODO: Initialize matrix private attributes for use in alignment
-        # create matrices for alignment scores, gaps, and backtracing
-        pass
+        # Initialize matrix private attributes for use in alignment
+        # Create matrices for alignment scores, gaps, and backtracing
+        self._scores_mat = np.empty((len(seqA)+1, len(seqB)+1))
+
+        self._back = np.empty((len(seqA)+1, len(seqB)+1), dtype=object)
 
         
-        # TODO: Implement global alignment here
-        pass      		
+        # Global alignment 
+        # Assign first row and column based on gap opening and extension penalty
+        self._scores_mat[:, 0] = [0., *[self.gap_open + x * self.gap_extend for x in range(1, len(seqA)+1) ]]
+
+        self._scores_mat[0, :] = [0., *[self.gap_open + x * self.gap_extend for x in range(1, len(seqB)+1) ]]
+
+        self._back[0] = [(0, 0), *[(0, x) for x in range(len(seqB))]]
+        self._back[:, 0] = [(0, 0), *[(x, 0) for x in range(len(seqA))]]
+        
+
+        # Helper function to compute (sim(seqA[i], '-'), sim('-', seqB[j]), sim(seqA[i], seqB[j]))
+        def similarities(i, j):
+            # c b
+            # a 
+
+            a_last = self._back[i, j-1]
+            b_last = self._back[i-1, j]
+
+            # Check if a gap is being extended or opened
+            if a_last == (i, j-2): # Gap extension
+                a_gap = self.gap_extend
+            else:
+                a_gap = self.gap_open + self.gap_extend
+
+            if b_last == (i-2, j):  # Gap extension
+                b_gap = self.gap_extend
+            else:
+                b_gap = self.gap_open + self.gap_extend
+
+            # Compute similarity between seqA[i] and seqB[j]
+            sim_i_j = self.sub_dict[(self._seqA[i-1], self._seqB[j-1])]
+
+            return a_gap, b_gap, sim_i_j
+
+
+
+        # Compute alignment score for each position in matrix other than first row and column 
+        for i in range(1, len(seqA) + 1):     
+            for j in range(1, len(seqB) + 1):
+                sims = similarities(i, j)
+
+                scores = [
+                    self._scores_mat[i, j-1] + sims[0],
+                    self._scores_mat[i-1, j] + sims[1],
+                    self._scores_mat[i-1, j-1] + sims[2]
+                    ]
+
+                self._scores_mat[i, j] = max(scores)
+                best = np.argmax(scores)
+
+                if best == 0:
+                    self._back[i, j] = (i, j-1)
+                elif best == 1:
+                    self._back[i, j] = (i-1, j)
+                else:
+                    self._back[i, j] = (i-1, j-1)
         		    
+        self.alignment_score = self._scores_mat[i, j]
         return self._backtrace()
 
     def _backtrace(self) -> Tuple[float, str, str]:
@@ -150,10 +214,26 @@ class NeedlemanWunsch:
          	(alignment score, seqA alignment, seqB alignment) : Tuple[float, str, str]
          		the score and corresponding strings for the alignment of seqA and seqB
         """
-        pass
+        # Start from bottom right   
+        i = len(self._seqA)
+        j = len(self._seqB)
+        
+        while i > 0 or j > 0:
+            i_prev, j_prev = self._back[i, j]
 
+            if i_prev == i - 1: 
+                self.seqA_align = self._seqA[i-1] + self.seqA_align
+            else:
+                self.seqA_align = '-' + self.seqA_align
+
+            if j_prev == j - 1:
+                self.seqB_align = self._seqB[j-1] + self.seqB_align
+            else:
+                self.seqB_align = '-' + self.seqB_align
+
+            i, j = i_prev, j_prev
         return (self.alignment_score, self.seqA_align, self.seqB_align)
-
+    
 
 def read_fasta(fasta_file: str) -> Tuple[str, str]:
     """
